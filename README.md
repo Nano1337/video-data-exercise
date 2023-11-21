@@ -1,8 +1,6 @@
-# Halodi Candidate Exercise: Video Dataloader
+# Video Dataloader Exercise
 
-Welcome to the Candidate Exercise for 1X Technologies (AI Team)
-
-On the AI team, we wear multiple hats by working on datasets, research, infrastructure, testing, fleet operations. The research engineering role we are hiring for will involve a lot of open-ended creative thinking and problem solving. In this assignment, you will attempt to answer as many of the following questions as possible.
+Author: Haoli Yin
 
 # System Requirements
 
@@ -12,10 +10,10 @@ Ubuntu, with GPU and CUDA. If you don't have access to a GPU, you can also run t
 
 This starter codebase consists of a PyTorch Dataloader for videos, which reads frames at uniform random from a .MOV file, preprocesses them with some transforms, and then batches this together in parallel into a batch size of 128. 
 
-1. Optional: We recommend using Conda or Virtualenv environments to reduce the risk of dependency issues with existing installations. For example:
+1. Create python virtual environment
 
 ```
-python3.8 -m venv ./venv
+python -m venv ./venv
 source venv/bin/activate
 ```
 
@@ -25,7 +23,7 @@ It's assumed that all further instructions pip install with your conda/virtualen
 3. Install additional dependencies:
 
 ```
-python -m pip install av tqdm
+pip install -r requirements.txt
 ```
 
 2. Run the following script:
@@ -50,6 +48,12 @@ Note, you may have to find a way to build hardware-accelerated ffmpeg in Colab r
 
 
 1) When running this code as-is without modifications, what is the reported baseline images/second from this dataloader? Please also report your CPU / RAM / GPU configuration of your machine.
+
+- System configuration: 
+    - Currently using a research server 
+    - CPU: dual-socket AMD EPYC 7H12 64-Core Processor setup, totaling 256 cores @ 2.60GHz
+    - RAM: 2.0 TiB
+    - GPU: NVIDIA RTX A6000 GPU with 49GiB VRAM
 
 2) What happens if you have 200+ different video files you are loading frames from? Can you extend the dataloader to handle uniform random sampling from that many videos?
 
