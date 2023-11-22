@@ -69,7 +69,7 @@ def run_dataloader():
         transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.5),
     ])
 
-    ds = VideoDataset(filename, transform=train_transform, use_gpu=True)
+    ds = VideoDataset(filename, transform=train_transform, use_gpu=False) # CHANGE HERE for GPU support 
     train_dataloader = DataLoader(ds, batch_size=128, shuffle=True, num_workers=10)
     device = 'cuda'
 
