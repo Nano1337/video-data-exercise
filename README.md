@@ -2,10 +2,6 @@
 
 Author: Haoli Yin
 
-# System Requirements
-
-Ubuntu, with GPU and CUDA. If you don't have access to a GPU, you can also run this code on [Google Colab](https://colab.research.google.com/), which should provide a free GPU instance. You can use other OSes to complete the exercise, but it's on you to figure out how to get the code working.
-
 # Installation and Setup
 
 This starter codebase consists of a PyTorch Dataloader for videos, which reads frames at uniform random from a .MOV file, preprocesses them with some transforms, and then batches this together in parallel into a batch size of 128. 
@@ -17,28 +13,23 @@ python -m venv ./venv
 source venv/bin/activate
 ```
 
-It's assumed that all further instructions pip install with your conda/virtualenv environment.
-
-2. Follow instructions from https://pytorch.org/get-started/locally/ to install PyTorch. 
-3. Install additional dependencies:
+2. Install dependencies:
 
 ```
 pip install -r requirements.txt
 ```
 
-2. Run the following script:
+3. Download the video to use: 
+```
+gdown 1PLCIa9lvlKMEJjSahixoChDsF_s7xFuL
+```
+
+4. Run the following script:
 
 ```
 python load_video.py
 ```
 
-# Colab Instructions
-
-In Google Colab you can download the MOV file by running:
-
-```
-!gdown 1PLCIa9lvlKMEJjSahixoChDsF_s7xFuL
-```
 
 which saves to `/content/IMG_4475.MOV`
 
@@ -89,3 +80,95 @@ cu->cuInit(0) failed
 What is the cause of this error? Can you fix this? 
 
 6) Can you modify the dataloader+model pipeline so that there is minimal data copying between GPU and CPU?
+
+
+# Building ffmpeg from source: 
+Building FFmpeg from source and ensuring that the FFmpeg library path is added to your system's dynamic linker configuration is a multi-step process. Below is a step-by-step guide:
+
+### Step 1: Install Necessary Dependencies
+
+Before building FFmpeg, you need to install various dependencies required for the compilation process.
+
+1. Open a terminal.
+2. Update your package manager's database (example for Debian/Ubuntu):
+   ```bash
+   sudo apt update
+   ```
+3. Install the build dependencies (example for Debian/Ubuntu):
+   ```bash
+   sudo apt install autoconf automake build-essential cmake git-core libass-dev libfreetype6-dev \
+   libsdl2-dev libtool libva-dev libvdpau-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev \
+   pkg-config texinfo wget zlib1g-dev yasm libx264-dev libx265-dev libnuma-dev \
+   libvpx-dev libfdk-aac-dev libmp3lame-dev libopus-dev
+   ```
+
+   This is a general list and might need adjustments based on your specific requirements for FFmpeg features.
+
+### Step 2: Download FFmpeg Source Code
+
+1. Clone the FFmpeg source code repository:
+   ```bash
+   git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg
+   ```
+2. Navigate to the cloned directory:
+   ```bash
+   cd ffmpeg
+   ```
+
+### Step 3: Configure the Build
+
+Run the `configure` script to set up the build environment. Here's an example command that includes some common options:
+
+```bash
+./configure --prefix=/usr/local --enable-gpl --enable-version3 --enable-nonfree \
+--enable-shared --enable-libx264 --enable-libx265 --enable-libvpx --enable-libfdk-aac \
+--enable-libmp3lame --enable-libopus --enable-vaapi --enable-vdpau --enable-cuda \
+--enable-cuvid --enable-libfreetype --enable-libass --enable-libsoxr --enable-libzimg
+```
+
+### Step 4: Compile and Install FFmpeg
+
+1. Compile FFmpeg:
+   ```bash
+   make -j$(nproc)
+   ```
+   - `$(nproc)` uses all available cores for faster compilation.
+
+2. Verify executable: 
+   ```
+   ls -l ffmpeg 
+   ./ffmpeg
+   ```
+3. Install FFmpeg:
+   ```bash
+   sudo make install
+   ```
+
+### Step 5: Update Dynamic Linker Configurations
+
+1. Add the FFmpeg library path to the dynamic linker configuration. First, create a new configuration file:
+   ```bash
+   echo "/usr/local/lib" | sudo tee /etc/ld.so.conf.d/ffmpeg.conf
+   ```
+   - Assuming FFmpeg libraries are installed in `/usr/local/lib`.
+2. Update the dynamic linker cache:
+   ```bash
+   sudo ldconfig
+   ```
+
+### Step 6: Verify Installation
+
+1. Check if FFmpeg is installed correctly:
+   ```bash
+   ffmpeg -version
+   ```
+2. Verify the dynamic linker recognizes the FFmpeg libraries:
+   ```bash
+   ldconfig -p | grep libavcodec
+   ```
+
+### Notes:
+
+- The above steps are demonstrated for a Debian/Ubuntu-based system. Adjust the package installation commands if you're using a different Linux distribution.
+- The `./configure` options might vary based on what functionalities you want to include with FFmpeg. Check the FFmpeg documentation for more details on available configuration options.
+- If you encounter any errors during the process, they will typically indicate what is missing or needs to be corrected.
