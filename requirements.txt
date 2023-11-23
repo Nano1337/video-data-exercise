@@ -5,3 +5,4 @@ torchvision
 torchaudio
 more-itertools
 gdown
+cython==0.29.36
