@@ -189,9 +189,13 @@ In order to address the challenge of feeding high throughput to the model withou
 
 Hint: how fast is sequentially reading from the videos? This is obviously not uniform random, but it might give you a sense of what peak performance could look like.
 
-Inspired by the (Sparse Temporal Sampling)[https://arxiv.org/abs/1608.00859] method, we can divide videos into segments
+In optimizing the video frame sampling process, I found a trade-off between faster sequential data loading and sufficient randomness for unbiased model training. Larger chunk sizes improved loading efficiency due to reduced I/O overhead, with chunk rates of 5, 10, and 15 FPS yielding iteration speeds of 0.550, 0.315, and 0.243 iterations/second. However, bigger chunks increased chances of high correlation between adjacent frames, introducing potential training bias. The optimal balance lies in a chunk size that maximizes sequential reading throughput while retaining enough randomness to ensure diverse, unbiased sampling for model development.
 
 4.1) Follow-up to your solution: if you are no longer picking frames completely at random, can you analytically derive the amount of "statistical bias" arising from your approach? Here, an unbiased solution would be something where the expected gradients to the model are equivalent to that of sampling frames i.i.d. 
+
+
+
+May overfit on certain temporal patterns
 
 The remaining questions require GPU/CUDA. 
 

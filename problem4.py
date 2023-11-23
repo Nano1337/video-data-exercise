@@ -1,6 +1,5 @@
 import av
 import os
-import random
 from more_itertools import one
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
@@ -8,62 +7,61 @@ import torch.nn as nn
 import torch
 from tqdm import tqdm
 import time
-from collections import defaultdict
+from einops import rearrange
 
 class MultiVideoDataset(Dataset):
-    """
-    Method inspired by https://github.com/RaivoKoot/Video-Dataset-Loading-Pytorch/blob/main/video_dataset.py
-    """
-
-    def __init__(self, filenames, transform, num_segments=3, frames_per_segment=1, use_gpu=False):
+    def __init__(self, filenames, transform, chunk_size=10, use_gpu=False):
         self.filenames = filenames
         self.transform = transform
-        self.num_segments = num_segments
-        self.frames_per_segment = frames_per_segment
+        self.chunk_size = chunk_size
         self.use_gpu = use_gpu
-        self.segment_metadata = []
-        self.total_segments = 0
+        self.global_chunk_indices = []
 
         for filename in filenames:
             container = av.open(filename)
             stream = one(container.streams.video)
             num_frames = stream.frames
-            segment_length = num_frames // num_segments
-            for segment_idx in range(num_segments):
-                start_frame = segment_idx * segment_length
-                end_frame = start_frame + segment_length
-                self.segment_metadata.append((filename, start_frame, end_frame))
-            self.total_segments += num_segments
             container.close()
+            
+            # Calculate the number of chunks in each video
+            num_chunks = num_frames // self.chunk_size
+            for chunk_start in range(num_chunks):
+                self.global_chunk_indices.append((filename, chunk_start * self.chunk_size))
 
     def __len__(self):
-        return self.total_segments * self.frames_per_segment
+        return len(self.global_chunk_indices)
 
-    def __getitem__(self, _):
-        segment_idx = random.randint(0, self.total_segments - 1)
-        filename, start_frame, end_frame = self.segment_metadata[segment_idx]
-        frame_idx = random.randint(start_frame, end_frame - 1)
+    def __getitem__(self, idx):
+        filename, start_frame = self.global_chunk_indices[idx]
+        end_frame = start_frame + self.chunk_size
+        frames = self.read_frames(start_frame, end_frame, filename)
+        images = [self.transform(frame) for frame in frames]
+        return torch.stack(images)  # Stack images into a single tensor
 
-        image = self.read_frame(frame_idx, filename)
-        image = self.transform(image)
-        return image
-
-    def read_frame(self, idx, filename):
-        try:
-            container = av.open(filename)
+    def read_frames(self, start_frame, end_frame, filename):
+        frames = []
+        with av.open(filename) as container:
             stream = one(container.streams.video)
+            target_start_pts = start_frame * int(stream.duration / stream.frames)
 
-            target_pts = idx * int(stream.duration / stream.frames)
-            container.seek(target_pts, backward=True, any_frame=False, stream=stream)
-
+            container.seek(target_start_pts, backward=True, any_frame=False, stream=stream)
             for frame in container.decode(video=0):
-                if frame.pts == target_pts:
-                    return frame.to_image()
-        except Exception as e:
-            print(f"Error reading frame: {e}")
-        finally:
-            container.close()
-        return None
+                if frame.pts >= target_start_pts:
+                    frames.append(frame.to_image())
+                    if len(frames) >= (end_frame - start_frame):
+                        break
+
+        if len(frames) < (end_frame - start_frame):
+            raise ValueError(f'Could not read all frames from {start_frame} to {end_frame}')
+
+        return frames
+
+def custom_collate_fn(batch):
+    batch = torch.stack(batch, dim=0)
+    batch = rearrange(batch, 'b f c h w -> (b f) c h w')
+    print(batch.shape)
+    return batch[:128]  # Ensure the batch size is 128 frames
+
 
 def run_dataloader():
     foldername = "video_data"
@@ -76,8 +74,14 @@ def run_dataloader():
         transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.5),
     ])
 
-    ds = MultiVideoDataset(filelist, train_transform, num_segments=1, frames_per_segment=5, use_gpu=False)
-    train_dataloader = DataLoader(ds, batch_size=128, shuffle=True, num_workers=10)
+    ds = MultiVideoDataset(filelist, train_transform, chunk_size=8, use_gpu=False)
+    train_dataloader = DataLoader(
+        ds, 
+        batch_size=128, 
+        shuffle=True, 
+        num_workers=10,
+        collate_fn=custom_collate_fn,
+        )
     device = 'cuda'
 
     run_model = False
@@ -89,7 +93,6 @@ def run_dataloader():
     it = 0
     start = time.time()
     for imgs in tqdm(train_dataloader):
-        print(imgs.shape)
         imgs = imgs.to(device)
         if run_model:
             with torch.no_grad():
