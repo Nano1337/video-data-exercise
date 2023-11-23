@@ -183,19 +183,21 @@ After duplicating the video 200 times and renaming with the helper script `video
 
 3) Suppose you are feeding a model that consumes images at 5X the rate printed from (1). Can you find ways to speed up the dataloader from (2) without decreasing the batch size?
 
-In order to address the challenge of feeding high throughput to the model without compromising batch size, we implemented optimizations in the PyTorch DataLoader across multiple dimensions. First, worker thread count was increased to leverage greater parallelism during data extraction and loading, while balancing potential bottlenecks in CPU utilization and disk I/O. Second, the pin_memory flag was set during instantiation to enable expedited transfer of tensor batches to CUDA-enabled GPU memory. This alleviates transfer latency to the high-performance computational hardware. Finally, the prefetch_factor parameter was set to preload additional batches into memory so that data is consistently available to minimize idle time between propagations.
+In order to address the challenge of feeding high throughput to the model without compromising batch size, I implemented optimizations in the PyTorch DataLoader across multiple dimensions. First, worker thread count was increased to leverage greater parallelism during data extraction and loading, while balancing potential bottlenecks in CPU utilization and disk I/O. Second, the pin_memory flag was set during instantiation to enable expedited transfer of tensor batches to CUDA-enabled GPU memory. This alleviates transfer latency to the high-performance computational hardware. Finally, the prefetch_factor parameter was set to preload additional batches into memory so that data is consistently available to minimize idle time between propagations. This increases iteration speed to 1.42 it/sec. 
 
 4) Suppose we relax the assumption of strict uniform sampling, i.e. you no longer have to pick frames completely at random. How might you speed up the dataloader while still keeping the sampling as close to random as possible?
 
 Hint: how fast is sequentially reading from the videos? This is obviously not uniform random, but it might give you a sense of what peak performance could look like.
 
-In optimizing the video frame sampling process, I found a trade-off between faster sequential data loading and sufficient randomness for unbiased model training. Larger chunk sizes improved loading efficiency due to reduced I/O overhead, with chunk rates of 5, 10, and 15 FPS yielding iteration speeds of 0.550, 0.315, and 0.243 iterations/second. However, bigger chunks increased chances of high correlation between adjacent frames, introducing potential training bias. The optimal balance lies in a chunk size that maximizes sequential reading throughput while retaining enough randomness to ensure diverse, unbiased sampling for model development.
+From the script `sequential_read.py`, I found that peak performance of reading a single video sequentially was around 5 it/sec. In optimizing the video frame sampling process, I found a trade-off between faster sequential data loading and sufficient randomness for unbiased model training. Larger chunk sizes improved loading efficiency due to reduced I/O overhead, with chunk rates of 4, 8, and 16 yielding iteration speeds of 2.629, 3.298, and 3.769 iterations/second, respectively. However, bigger chunks increased chances of high correlation between adjacent frames, introducing potential training bias. The optimal balance lies in a chunk size that maximizes sequential reading throughput while retaining enough randomness to ensure diverse, unbiased sampling for model development.
 
 4.1) Follow-up to your solution: if you are no longer picking frames completely at random, can you analytically derive the amount of "statistical bias" arising from your approach? Here, an unbiased solution would be something where the expected gradients to the model are equivalent to that of sampling frames i.i.d. 
 
+We are given an unbiased solution where the expected gradients to the model are equivalent to that of sampling frames independent and identically distributed (IID) or uniformly random in our case. In other words, the expected gradient is $G_{iid} =  \mathbb{E}_{x \in X}[\nabla_{\theta} L(\theta, x)]$ where L is the loss function, $\theta$ represents the model parameters, and $X$ is the set of all frames uniformly sampled. 
 
+Now, let's consider the sampling procedure where chunk size is 5, which means that 5 sequential frames are sampled. If the total number of frames is N, then there are N-4 (sliding window of 5 picked at random). In other words, the expected gradient of this sequence of frames is $G_{seq} = \frac{1}{N-4}\sum_{i=1}^{N-4}\nabla_{\theta}L(\theta, S_i)$ where $S_i$ is the $i-th$ set of 5 sequential frames. This means each gradient calculation considers the interdependencies and temporal patterns within each set of 5 frames.
 
-May overfit on certain temporal patterns
+The resulting bias would then be $Bias  = G_{seq} - G_{iid}$. Now considering the impact of sequential frames, we can see that there will be temporal correlation from sequential sets of frames and patterns that the model may overfit to as we increase the number of sequential frames per set, potentially affecting its generalization ability. There would need to be some empirical validation on the optimal balance between latency reduction and amount of statistical bias introduced when determining the chunk size to use. 
 
 The remaining questions require GPU/CUDA. 
 
@@ -204,7 +206,7 @@ The remaining questions require GPU/CUDA.
 Note, you may also have to install hardware-accelerated ffmpeg via instructions here: https://www.cyberciti.biz/faq/how-to-install-ffmpeg-with-nvidia-gpu-acceleration-on-linux/
 
 From the script `load_video_baseline.py` with `use_gpu=True`:
-With GPU: 0.124 it/sec, ~3.8x speedup
+With GPU: ???
 
 5.1) Follow-up question: if you are using GPU decoding + multiple dataloader workers + modify the code to set `run_model=True`, you will encounter the following error like the following:
 

@@ -59,8 +59,7 @@ class MultiVideoDataset(Dataset):
 def custom_collate_fn(batch):
     batch = torch.stack(batch, dim=0)
     batch = rearrange(batch, 'b f c h w -> (b f) c h w')
-    print(batch.shape)
-    return batch[:128]  # Ensure the batch size is 128 frames
+    return batch
 
 
 def run_dataloader():
@@ -74,10 +73,12 @@ def run_dataloader():
         transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.5),
     ])
 
-    ds = MultiVideoDataset(filelist, train_transform, chunk_size=8, use_gpu=False)
+
+    chunk_size = 16
+    ds = MultiVideoDataset(filelist, train_transform, chunk_size=chunk_size, use_gpu=False)
     train_dataloader = DataLoader(
         ds, 
-        batch_size=128, 
+        batch_size=128//chunk_size, 
         shuffle=True, 
         num_workers=10,
         collate_fn=custom_collate_fn,

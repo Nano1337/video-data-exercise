@@ -55,7 +55,14 @@ def run_dataloader():
     ])
 
     ds = MultiVideoDataset(filelist, train_transform, use_gpu=False)
-    train_dataloader = DataLoader(ds, batch_size=128, shuffle=True, num_workers=10)
+    train_dataloader = DataLoader(
+        ds, 
+        batch_size=128, 
+        shuffle=True, 
+        num_workers=16, 
+        pin_memory=True,
+        prefetch_factor=4,
+        )
     device = 'cuda'
 
     run_model = False
@@ -67,7 +74,6 @@ def run_dataloader():
     it = 0
     start = time.time()
     for imgs in tqdm(train_dataloader):
-        print(imgs.shape)
         imgs = imgs.to(device)
         if run_model:
             with torch.no_grad():
