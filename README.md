@@ -205,8 +205,27 @@ The remaining questions require GPU/CUDA.
 
 Note, you may also have to install hardware-accelerated ffmpeg via instructions here: https://www.cyberciti.biz/faq/how-to-install-ffmpeg-with-nvidia-gpu-acceleration-on-linux/
 
+I was able to build ffmpeg with hardware acceleration via the process above but was unable to install the hardware accelerated branch of PyAV from your forked repo since I was getting the error below. However, I was able to build and install from the original PyAV source, but that resulted in worse than expected cuvid decoding than expected (should be faster, not slower than CPU decoding).
+
+```bash 
+building 'av.stream' extension
+x86_64-linux-gnu-gcc -Wno-unused-result -Wsign-compare -DNDEBUG -g -fwrapv -O2 -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -g -fwrapv -O2 -O0 -fPIC -g -Ibuild/temp.linux-x86_64-cpython-310/include -I/usr/local/include -I/usr/include/python3.10 -Iinclude -I/home/haoli/documents/video-data-exercise/PyAV-novetta/venvs/Linux.5.15.133.1-microsoft-standard-WSL2.cpython3.10/include -I/home/haoli/documents/video-data-exercise/PyAV-novetta/venvs/Linux.5.15.133.1-microsoft-standard-WSL2.cpython3.10/include -I/usr/include/python3.10 -Ibuild/temp.linux-x86_64-cpython-310/include -c src/av/stream.c -o build/temp.linux-x86_64-cpython-310/src/av/stream.o
+src/av/stream.c: In function ‘__pyx_f_2av_6stream_wrap_stream’:
+src/av/stream.c:2375:27: error: ‘struct AVStream’ has no member named ‘codec’
+ 2375 |   switch (__pyx_v_c_stream->codec->codec_type) {
+      |                           ^~
+src/av/stream.c: In function ‘__pyx_f_2av_6stream_6Stream__init’:
+src/av/stream.c:2994:29: error: ‘struct AVStream’ has no member named ‘codec’
+ 2994 |   __pyx_t_1 = __pyx_v_stream->codec;
+      |                             ^~
+src/av/stream.c:3117:15: warning: assignment discards ‘const’ qualifier from pointer target type [-Wdiscarded-qualifiers]        
+ 3117 |     __pyx_t_7 = __pyx_v_self->_codec_context->codec;
+      |               ^
+error: command '/usr/bin/x86_64-linux-gnu-gcc' failed with exit code 1
+```
+
 From the script `load_video_baseline.py` with `use_gpu=True`:
-With GPU: ???
+With GPU: 0.126 it/sec (should be higher than CPU version). 
 
 5.1) Follow-up question: if you are using GPU decoding + multiple dataloader workers + modify the code to set `run_model=True`, you will encounter the following error like the following:
 
@@ -223,6 +242,58 @@ cu->cuInit(0) failed
 
 What is the cause of this error? Can you fix this? 
 
+The cause of this error `CUDA_ERROR_NOT_INITIALIZED: initialization error` stems from conflicting initialization of CUDA in a multi-threaded environment as we're using multiple datalaoders where `num_workers>0`. CUDA contexts aren't shared across processes, so each process needs to properly initialize its own CUDA context. These are the changes that would need to be made: 
+
+```python 
+def worker_init_fn(worker_id):
+    torch.cuda.init()  # Initialize CUDA in each worker
+```
+
+and change the Dataloader creation to include this function: 
+```python 
+train_dataloader = DataLoader(ds, batch_size=128, shuffle=True, num_workers=16, worker_init_fn=worker_init_fn)
+```
+
 6) Can you modify the dataloader+model pipeline so that there is minimal data copying between GPU and CPU?
 
+To reduce data copying between the GPU and CPU, one thing we can do is modify the function read_frame_gpu. Currently, the function finds the correct frame and decodes it with the `h264_cuvid` decoder, which then saves it as a CPU PIL image for further processing. We then do transformations on this PIL image to convert it to a tensor and then push it to the GPU. This round trip from GPU to CPU to GPU again introduces latency, so what we can do is try to keep the data on the GPU after decoding. This is one possible implementation and slight other adjustments to the code are necessary: 
+
+```python
+import torch
+from torch import from_dlpack
+
+def read_frame_gpu(self, idx):
+    if self.container is None:
+        self.init_container()
+
+    self.ctx = av.Codec('h264_cuvid', 'r').create()
+    self.ctx.extradata = self.stream.codec_context.extradata
+
+    target_pts = idx * int(self.stream.duration / self.stream.frames)
+    self.container.seek(target_pts, backward=True, stream=self.stream, any_frame=False)
+
+    for packet in self.container.demux(self.stream):
+        for frame in self.ctx.decode(packet):
+            if frame.pts == target_pts:
+                gpu_tensor = convert_frame_to_tensor(frame)  # see function below
+                return gpu_tensor
+
+    raise ValueError(f'Could not find frame with pts {target_pts}')
+
+def convert_frame_to_tensor(frame):
+    try:
+        # Attempt to convert the frame to a DLPack capsule
+        dltensor = frame.to_dlpack()
+    except AttributeError:
+        raise RuntimeError("Frame object does not support to_dlpack conversion.")
+    except Exception as e:
+        raise RuntimeError(f"An error occurred during frame conversion: {e}")
+
+    # Convert the DLPack capsule to a PyTorch tensor on the GPU
+    tensor = from_dlpack(dltensor)
+
+    # transformations can be done here instead of later
+
+    return tensor
+```
 
