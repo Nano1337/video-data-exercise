@@ -24,66 +24,18 @@ pip install -r requirements.txt
 gdown 1PLCIa9lvlKMEJjSahixoChDsF_s7xFuL
 ```
 
-4. Run the following script:
+4. Run the following script with use_cuda=False
 
 ```
-python load_video.py
+python load_video_baseline.py
 ```
 
+## Hardware-Accelerated FFmpeg:
+Building FFmpeg from source for linux-based systems and ensuring that the FFmpeg library path is added to your system's dynamic linker configuration is a multi-step process. 
 
-which saves to `/content/IMG_4475.MOV`
+Some commands were taken from the (following link)[https://www.cyberciti.biz/faq/how-to-install-ffmpeg-with-nvidia-gpu-acceleration-on-linux] on how to install ffmpeg with nvidia gpu acceleration on linux but a lot of it was by trial and error.
 
-Note, you may have to find a way to build hardware-accelerated ffmpeg in Colab runtime.
-
-# Exercises
-
-
-1) When running this code as-is without modifications, what is the reported baseline images/second from this dataloader? Please also report your CPU / RAM / GPU configuration of your machine.
-
-- System configuration: 
-    - Currently using a research server 
-    - CPU: dual-socket AMD EPYC 7H12 64-Core Processor setup, totaling 256 cores @ 2.60GHz
-    - RAM: 2.0 TiB
-    - GPU: NVIDIA RTX A6000 GPU with 49GiB VRAM
-
-2) What happens if you have 200+ different video files you are loading frames from? Can you extend the dataloader to handle uniform random sampling from that many videos?
-
-Note: for this exercise you can duplicate the provided IMG_4475.MOV video 200 times, but pretend that you are loading from 200 unique video files.
-
-3) Suppose you are feeding a model that consumes images at 5X the rate printed from (1). Can you find ways to speed up the dataloader from (2) without decreasing the batch size?
-
-4) Suppose we relax the assumption of strict uniform sampling, i.e. you no longer have to pick frames completely at random. How might you speed up the dataloader while still keeping the sampling as close to random as possible?
-
-Hint: how fast is sequentially reading from the videos? This is obviously not uniform random, but it might give you a sense of what peak performance could look like.
-
-4.1) Follow-up to your solution: if you are no longer picking frames completely at random, can you analytically derive the amount of "statistical bias" arising from your approach? Here, an unbiased solution would be something where the expected gradients to the model are equivalent to that of sampling frames i.i.d. 
-
-The remaining questions require GPU/CUDA. 
-
-5) In typical ML workflows it's common to copy the preprocessed frames to GPU memory prior to feeding a ML model. You can install hardware-accelerated PyAV with this branch: `git clone -b hwaccel-1x https://github.com/Shade5/PyAV.git; cd PyAV; make; pip3 install .` and use the `use_gpu=True` arg to use the h264_cuvid decoder to decode frames.
-
-Note, you may also have to install hardware-accelerated ffmpeg via instructions here: https://www.cyberciti.biz/faq/how-to-install-ffmpeg-with-nvidia-gpu-acceleration-on-linux/
-
-5.1) Follow-up question: if you are using GPU decoding + multiple dataloader workers + modify the code to set `run_model=True`, you will encounter the following error like the following:
-
-```
-cu->cuInit(0) failed                                                                                     
-cu->cuInit(0) failed                       
--> CUDA_ERROR_NOT_INITIALIZED: initialization error                                                                                                                                                                
-                                                    
--> CUDA_ERROR_NOT_INITIALIZED: initialization error                                                                                                                                                                
-                                                                                                         
-cu->cuInit(0) failed                                                                                                                                                                                               
--> CUDA_ERROR_NOT_INITIALIZED: initialization error  
-```
-
-What is the cause of this error? Can you fix this? 
-
-6) Can you modify the dataloader+model pipeline so that there is minimal data copying between GPU and CPU?
-
-
-# Building ffmpeg from source: 
-Building FFmpeg from source and ensuring that the FFmpeg library path is added to your system's dynamic linker configuration is a multi-step process. Below is a step-by-step guide:
+Below is a step-by-step guide:
 
 ### Step 1: Install Necessary Dependencies
 
@@ -104,10 +56,23 @@ Before building FFmpeg, you need to install various dependencies required for th
 
    This is a general list and might need adjustments based on your specific requirements for FFmpeg features.
 
-### Step 2: Download FFmpeg Source Code
+### Step 2: Download nv-codec-headers
+
+1. To compile ffmpeg from NVIDIA, we need ffnvcodec. Clone git repo: 
+    ```bash 
+    mkdir ~/nvidia/ && cd ~/nvidia/
+    git clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git
+    ```
+2. Now build it: 
+    ```bash
+    cd nv-codec-headers && sudo make install
+    ```
+
+### Step 3: Download FFmpeg Source Code
 
 1. Clone the FFmpeg source code repository:
    ```bash
+   cd ~/nvidia
    git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg
    ```
 2. Navigate to the cloned directory:
@@ -130,7 +95,7 @@ Run the `configure` script to set up the build environment. Here's an example co
 
 1. Compile FFmpeg:
    ```bash
-   make -j$(nproc)
+   make -j $(nproc)
    ```
    - `$(nproc)` uses all available cores for faster compilation.
 
@@ -143,6 +108,14 @@ Run the `configure` script to set up the build environment. Here's an example co
    ```bash
    sudo make install
    ```
+4. Verify and add to PATH env var: 
+    ```bash 
+    ls -l /usr/local/bin/ffmpeg
+    type -a ffmpeg
+    echo "$PATH"
+    export PATH=$PATH:/usr/local/bin
+    echo "$PATH"
+    ```
 
 ### Step 5: Update Dynamic Linker Configurations
 
@@ -167,8 +140,83 @@ Run the `configure` script to set up the build environment. Here's an example co
    ldconfig -p | grep libavcodec
    ```
 
+### Build PyAV from source
+
+1. Get source code from GitHub and build it: 
+
+    ```bash 
+    git clone https://github.com/PyAV-Org/PyAV.git
+    make 
+    pip install .
+    ```
+
 ### Notes:
 
 - The above steps are demonstrated for a Debian/Ubuntu-based system. Adjust the package installation commands if you're using a different Linux distribution.
 - The `./configure` options might vary based on what functionalities you want to include with FFmpeg. Check the FFmpeg documentation for more details on available configuration options.
 - If you encounter any errors during the process, they will typically indicate what is missing or needs to be corrected.
+
+### Running with h264_cuvid codec: 
+
+To run with hardware acceleration, set `use_cuda=True` and run the following: 
+```bash
+python load_video_baseline .py
+```
+
+# Exercises
+
+1) When running this code as-is without modifications, what is the reported baseline images/second from this dataloader? Please also report your CPU / RAM / GPU configuration of your machine.
+
+CPU only: 0.471 it/sec
+See problem 5 for GPU runtime
+
+- System configuration:  
+    - CPU: AMD Ryzen 7 7800X3D 8-Core Processor
+    - RAM: 29 GiB
+    - GPU: NVIDIA GeForce RTX 4090 GPU with 24 GiB VRAM
+
+2) What happens if you have 200+ different video files you are loading frames from? Can you extend the dataloader to handle uniform random sampling from that many videos?
+
+Note: for this exercise you can duplicate the provided IMG_4475.MOV video 200 times, but pretend that you are loading from 200 unique video files.
+
+After duplicating the video 200 times and renaming with the helper script `video_duplicate.py`, the solution can be found in `problem2_3.py`. When dealing with 200+ different video files in a dataset, the MultiVideoDataset class effectively extends the DataLoader to handle uniform random sampling across all these videos. It achieves this by creating a global frame index, where each frame from every video is assigned a unique index. This index is used to uniformly sample frames across the entire dataset, ensuring that every frame, irrespective of the video it belongs to, has an equal chance of being selected. This approach allows the DataLoader to efficiently handle a large number of video files while maintaining the strict requirement of uniform random sampling. This method gives us 1.15 it/sec. 
+
+3) Suppose you are feeding a model that consumes images at 5X the rate printed from (1). Can you find ways to speed up the dataloader from (2) without decreasing the batch size?
+
+In order to address the challenge of feeding high throughput to the model without compromising batch size, we implemented optimizations in the PyTorch DataLoader across multiple dimensions. First, worker thread count was increased to leverage greater parallelism during data extraction and loading, while balancing potential bottlenecks in CPU utilization and disk I/O. Second, the pin_memory flag was set during instantiation to enable expedited transfer of tensor batches to CUDA-enabled GPU memory. This alleviates transfer latency to the high-performance computational hardware. Finally, the prefetch_factor parameter was set to preload additional batches into memory so that data is consistently available to minimize idle time between propagations.
+
+4) Suppose we relax the assumption of strict uniform sampling, i.e. you no longer have to pick frames completely at random. How might you speed up the dataloader while still keeping the sampling as close to random as possible?
+
+
+
+Hint: how fast is sequentially reading from the videos? This is obviously not uniform random, but it might give you a sense of what peak performance could look like.
+
+4.1) Follow-up to your solution: if you are no longer picking frames completely at random, can you analytically derive the amount of "statistical bias" arising from your approach? Here, an unbiased solution would be something where the expected gradients to the model are equivalent to that of sampling frames i.i.d. 
+
+The remaining questions require GPU/CUDA. 
+
+5) In typical ML workflows it's common to copy the preprocessed frames to GPU memory prior to feeding a ML model. You can install hardware-accelerated PyAV with this branch: `git clone -b hwaccel-1x https://github.com/Shade5/PyAV.git; cd PyAV; make; pip3 install .` and use the `use_gpu=True` arg to use the h264_cuvid decoder to decode frames.
+
+Note, you may also have to install hardware-accelerated ffmpeg via instructions here: https://www.cyberciti.biz/faq/how-to-install-ffmpeg-with-nvidia-gpu-acceleration-on-linux/
+
+From the script `load_video_baseline.py` with `use_gpu=True`:
+With GPU: 0.124 it/sec, ~3.8x speedup
+
+5.1) Follow-up question: if you are using GPU decoding + multiple dataloader workers + modify the code to set `run_model=True`, you will encounter the following error like the following:
+
+```
+cu->cuInit(0) failed                                                                                     
+cu->cuInit(0) failed                       
+-> CUDA_ERROR_NOT_INITIALIZED: initialization error                                                                                                                                                                
+                                                    
+-> CUDA_ERROR_NOT_INITIALIZED: initialization error                                                                                                                                                                
+                                                                                                         
+cu->cuInit(0) failed                                                                                                                                                                                               
+-> CUDA_ERROR_NOT_INITIALIZED: initialization error  
+```
+
+What is the cause of this error? Can you fix this? 
+
+6) Can you modify the dataloader+model pipeline so that there is minimal data copying between GPU and CPU?
+
+
