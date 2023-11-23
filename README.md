@@ -187,9 +187,9 @@ In order to address the challenge of feeding high throughput to the model withou
 
 4) Suppose we relax the assumption of strict uniform sampling, i.e. you no longer have to pick frames completely at random. How might you speed up the dataloader while still keeping the sampling as close to random as possible?
 
-
-
 Hint: how fast is sequentially reading from the videos? This is obviously not uniform random, but it might give you a sense of what peak performance could look like.
+
+Inspired by the (Sparse Temporal Sampling)[https://arxiv.org/abs/1608.00859] method, we can divide videos into segments
 
 4.1) Follow-up to your solution: if you are no longer picking frames completely at random, can you analytically derive the amount of "statistical bias" arising from your approach? Here, an unbiased solution would be something where the expected gradients to the model are equivalent to that of sampling frames i.i.d. 
 
