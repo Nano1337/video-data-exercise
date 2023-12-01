@@ -25,10 +25,12 @@ class MultiVideoDataset(Dataset):
                 self.global_frame_indices.append((filename, frame_number))
 
     def __len__(self):
+        # should be total number of frames in all videos
         return len(self.global_frame_indices)
 
     def __getitem__(self, idx):
         filename, frame_number = self.global_frame_indices[idx]
+        # read uniformly randomly sampled frame from all videos
         image = self.read_frame(frame_number, filename)
         image = self.transform(image)
         return image

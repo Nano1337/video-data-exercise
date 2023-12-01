@@ -18,7 +18,7 @@ class VideoDataset(Dataset):
 
         # get frame count
         container = av.open(filename) # container handles all components of the video file (audio, video, metadata, etc.)
-        stream = one(container.streams.video) # ensures only one video stream is retrieved
+        stream = one(container.streams.video) # ensures only one video stream is retrieved after demuxing
         self.num_frames = stream.frames
         # close this and have each worker re-open handle to container in its own process
         container.close()
@@ -86,7 +86,7 @@ def run_dataloader():
     run_model = False
 
     if run_model:
-        net = nn.Conv2d(3, 64, 3, 2)
+        net = nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=2)
         net.to(device)
     
     it = 0

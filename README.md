@@ -199,13 +199,17 @@ Now, let's consider the sampling procedure where chunk size is 5, which means th
 
 The resulting bias would then be $Bias  = G_{seq} - G_{iid}$. Now considering the impact of sequential frames, we can see that there will be temporal correlation from sequential sets of frames and patterns that the model may overfit to as we increase the number of sequential frames per set, potentially affecting its generalization ability. There would need to be some empirical validation on the optimal balance between latency reduction and amount of statistical bias introduced when determining the chunk size to use. 
 
+From what I've heard and assumed, 1X uses behavioral cloning from imitation learning where an expert (human operator in VR) demonstrates an action and a policy is learned that most closely matches the expert's actions, which is accomplished through supervised learning where the difference between the learned policy and expert are minimized w.r.t some metric. The problem comes when expert demonstrations aren't uniformly sampled since the learned policy will perform poorly when the states during inference time are not close to the states demonstrated by the expert. 
+- This is particularly a problem when the expert demonstrations come from a trajectory of sequential states and actions (like we did). This causes the policy to overfit to frames temporally correlated to a trajectory, which may cause the estimated policy to lead to states that the expert never encountered or handled differently. This mismatch can result in the agent not knowing the best action to take as its training did not include these situations. This distributional mismatch between estimated policy and expert policy can lead to compounding errors. 
+- A potential solution is Dataset Aggregation (DAgger) since you can collect new expert data as needed by rolling out current learned policy for some number of time steps and then asking expert what actions they would’ve taken at each step along that trajectory. However, this may be computationally inefficient and infeasible in some scenarios where the expert can't demonstrate those actions. 
+
 The remaining questions require GPU/CUDA. 
 
 5) In typical ML workflows it's common to copy the preprocessed frames to GPU memory prior to feeding a ML model. You can install hardware-accelerated PyAV with this branch: `git clone -b hwaccel-1x https://github.com/Shade5/PyAV.git; cd PyAV; make; pip3 install .` and use the `use_gpu=True` arg to use the h264_cuvid decoder to decode frames.
 
 Note, you may also have to install hardware-accelerated ffmpeg via instructions here: https://www.cyberciti.biz/faq/how-to-install-ffmpeg-with-nvidia-gpu-acceleration-on-linux/
 
-I was able to build ffmpeg with hardware acceleration via the process above but was unable to install the hardware accelerated branch of PyAV from your forked repo since I was getting the error below. However, I was able to build and install from the original PyAV source, but that resulted in worse than expected cuvid decoding than expected (should be faster, not slower than CPU decoding).
+I was able to build ffmpeg with hardware acceleration via the process above but was unable to install the hardware accelerated branch of PyAV from your forked repo since I was getting the error below. However, I was able to build and install from the original PyAV source, but that resulted in worse than expected cuvid decoding than expected (should be faster, not slower than CPU decoding). I tried this both on WSL2 and Ubuntu22.04 but I received the same error. 
 
 ```bash 
 building 'av.stream' extension
@@ -242,7 +246,7 @@ cu->cuInit(0) failed
 
 What is the cause of this error? Can you fix this? 
 
-The cause of this error `CUDA_ERROR_NOT_INITIALIZED: initialization error` stems from conflicting initialization of CUDA in a multi-threaded environment as we're using multiple datalaoders where `num_workers>0`. CUDA contexts aren't shared across processes, so each process needs to properly initialize its own CUDA context. These are the changes that would need to be made: 
+The cause of this error `CUDA_ERROR_NOT_INITIALIZED: initialization error` stems from conflicting initialization of CUDA in a multi-process environment as we're using multiple dataloaders where `num_workers>0`. CUDA contexts aren't shared across processes, so each process needs to properly initialize its own CUDA context. These are the changes that would need to be made: 
 
 ```python 
 def worker_init_fn(worker_id):
@@ -266,6 +270,7 @@ def read_frame_gpu(self, idx):
     if self.container is None:
         self.init_container()
 
+    # decodes onto GPU VRAM
     self.ctx = av.Codec('h264_cuvid', 'r').create()
     self.ctx.extradata = self.stream.codec_context.extradata
 
@@ -275,6 +280,7 @@ def read_frame_gpu(self, idx):
     for packet in self.container.demux(self.stream):
         for frame in self.ctx.decode(packet):
             if frame.pts == target_pts:
+                # while frame is on GPU, convert to tensor
                 gpu_tensor = convert_frame_to_tensor(frame)  # see function below
                 return gpu_tensor
 
@@ -282,7 +288,8 @@ def read_frame_gpu(self, idx):
 
 def convert_frame_to_tensor(frame):
     try:
-        # Attempt to convert the frame to a DLPack capsule
+        # Attempt to convert the frame (still on GPU) to a DLPack capsule
+        # DLPack is an open-source memory tensor structure that enables zero-copy transfer between different frameworks.
         dltensor = frame.to_dlpack()
     except AttributeError:
         raise RuntimeError("Frame object does not support to_dlpack conversion.")
